@@ -10,6 +10,9 @@ export const env = {
     KYC_PEPPER: process.env.KYC_PEPPER!,
     DEFAULT_TENANT_SLUG: process.env.DEFAULT_TENANT_SLUG || 'gyb',
     ROOT_DOMAIN: process.env.ROOT_DOMAIN || 'gcb.app',
+    LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+    // Number of proxy hops to trust for req.ip (1 behind an AWS load balancer); unset = trust none
+    TRUST_PROXY: parseInt(process.env.TRUST_PROXY || '0', 10),
     CORS_ORIGINS: (process.env.CORS_ORIGINS || 'http://localhost:3000').split(','),
 };
 

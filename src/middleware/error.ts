@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import { logger } from '../config/logger';
 
 export function notFound(_req: Request, res: Response) {
     res.status(404).json({ error: 'Route not found' });
@@ -7,7 +8,7 @@ export function notFound(_req: Request, res: Response) {
 
 export function errorHandler(
     err: any,
-    _req: Request,
+    req: Request,
     res: Response,
     _next: NextFunction
 ) {
@@ -21,7 +22,7 @@ export function errorHandler(
     // Only errors we raised deliberately ({ status, message }) expose their message;
     // anything else (e.g. Postgres errors) is logged and hidden from the client.
     const status = typeof err.status === 'number' ? err.status : 500;
-    if (status >= 500) console.error(err);
+    if (status >= 500) logger.error({ req_id: req.id, err }, 'unhandled error');
     const message = status >= 500 ? 'Internal Server Error' : err.message || 'Request failed';
     res.status(status).json({ error: message });
 }

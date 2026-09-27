@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { env } from './config/env';
 import { tenantResolver } from './middleware/tenants';
 import { errorHandler, notFound } from './middleware/error';
+import { requestLog } from './middleware/requestLog';
 
 import tenantRoutes from './modules/tenants/route';
 import authRoutes from './modules/auth/route';
@@ -13,6 +14,9 @@ import incidentRoutes from './modules/incidents/route';
 
 export function createApp() {
     const app = express();
+    if (env.TRUST_PROXY > 0) app.set('trust proxy', env.TRUST_PROXY);
+
+    app.use(requestLog);
 
     app.use(helmet());
     app.use(

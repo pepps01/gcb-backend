@@ -29,6 +29,8 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.24.4",
+    "pino": "^10.3.1",
+    "prisma": "^7.10.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -37,7 +39,6 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.2",
-    "prisma": "^7.10.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
