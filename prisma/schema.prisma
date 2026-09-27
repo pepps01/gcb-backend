@@ -1,0 +1,295 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ============ TENANCY ============
+model Tenant {
+  id               String   @id @default(uuid()) @db.Char(36)
+  slug             String   @unique @db.VarChar(60)
+  name             String   @db.VarChar(200)
+  tenant_type      String   @default("campaign") @db.VarChar(40)
+  status           String   @default("active") @db.VarChar(20)
+  plan             String   @default("standard") @db.VarChar(30)
+  custom_domain    String?  @unique @db.VarChar(200)
+  subdomain        String   @unique @db.VarChar(60)
+  country_code     String   @default("NG") @db.Char(2)
+  default_language String   @default("en") @db.VarChar(10)
+  timezone         String   @default("Africa/Lagos") @db.VarChar(50)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
+
+  branding     TenantBranding?
+  features     TenantFeature[]
+  members      TenantMember[]
+  levels       Level[]
+  kyc          KycSubmission[]
+  wallets      Wallet[]
+  wallet_txs   WalletTransaction[]
+  gift_batches GiftBatch[]
+  gifts        Gift[]
+  incidents    Incident[]
+  audit_logs   AuditLog[]
+
+  @@map("tenants")
+}
+
+model TenantBranding {
+  tenant_id       String   @id @db.Char(36)
+  app_name        String?  @db.VarChar(100)
+  tagline         String?  @db.VarChar(200)
+  logo_url        String?  @db.Text
+  primary_color   String?  @default("#0B6E4F") @db.Char(7)
+  secondary_color String?  @default("#F2A900") @db.Char(7)
+  accent_color    String?  @db.Char(7)
+  text_color      String?  @default("#111111") @db.Char(7)
+  font_family     String?  @default("Inter") @db.VarChar(60)
+  sms_sender_id   String?  @db.VarChar(11)
+  support_phone   String?  @db.VarChar(20)
+  support_email   String?  @db.VarChar(200)
+  social_links    Json?
+  updated_at      DateTime @default(now()) @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@map("tenant_branding")
+}
+
+model TenantFeature {
+  tenant_id   String  @db.Char(36)
+  feature_key String  @db.VarChar(80)
+  enabled     Boolean @default(true)
+  config      Json?
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@id([tenant_id, feature_key])
+  @@map("tenant_features")
+}
+
+// ============ USERS ============
+model User {
+  id                String    @id @default(uuid()) @db.Char(36)
+  phone             String    @unique @db.VarChar(20)
+  phone_verified_at DateTime?
+  email             String?   @db.VarChar(200)
+  password_hash     String?   @db.Text
+  full_name         String?   @db.VarChar(200)
+  photo_url         String?   @db.Text
+  preferred_lang    String?   @default("en") @db.VarChar(10)
+  status            String    @default("active") @db.VarChar(20)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+
+  memberships      TenantMember[]
+  gift_batches     GiftBatch[]     @relation("BatchCreator")
+  approved_batches GiftBatch[]     @relation("BatchApprover")
+  reviewed_kyc     KycSubmission[]
+  audit_logs       AuditLog[]
+
+  @@map("users")
+}
+
+model TenantMember {
+  id              String    @id @default(uuid()) @db.Char(36)
+  tenant_id       String    @db.Char(36)
+  user_id         String    @db.Char(36)
+  role            String    @default("supporter") @db.VarChar(40)
+  level_id        String?   @db.Char(36)
+  lga_id          Int?
+  ward_id         Int?
+  polling_unit_id Int?
+  referral_code   String?   @unique @db.VarChar(12)
+  referred_by     String?   @db.Char(36)
+  status          String    @default("pending") @db.VarChar(20)
+  joined_at       DateTime  @default(now())
+  verified_at     DateTime?
+  updated_at      DateTime  @default(now()) @updatedAt
+
+  tenant    Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  level     Level?         @relation(fields: [level_id], references: [id])
+  referrer  TenantMember?  @relation("Referrals", fields: [referred_by], references: [id])
+  referrals TenantMember[] @relation("Referrals")
+
+  kyc       KycSubmission[]
+  wallets   Wallet[]
+  gifts     Gift[]
+  incidents Incident[]
+
+  @@unique([tenant_id, user_id])
+  @@index([tenant_id, status])
+  @@map("tenant_members")
+}
+
+// Per-tenant member tiers (e.g. Supporter < Ward Leader < LGA Coordinator). Higher rank = more senior.
+model Level {
+  id          String   @id @default(uuid()) @db.Char(36)
+  tenant_id   String   @db.Char(36)
+  name        String   @db.VarChar(60)
+  rank        Int
+  description String?  @db.VarChar(255)
+  is_default  Boolean  @default(false)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  members TenantMember[]
+
+  @@unique([tenant_id, name])
+  @@unique([tenant_id, rank])
+  @@map("levels")
+}
+
+// ============ KYC ============
+model KycSubmission {
+  id               String    @id @default(uuid()) @db.Char(36)
+  tenant_id        String    @db.Char(36)
+  member_id        String    @db.Char(36)
+  nin_hash         String?   @db.Char(64)
+  vin_hash         String?   @db.Char(64)
+  nin_slip_url     String?   @db.Text
+  pvc_url          String?   @db.Text
+  lga_id           Int?
+  ward_id          Int?
+  polling_unit_id  Int?
+  status           String    @default("pending") @db.VarChar(20)
+  rejection_reason String?   @db.Text
+  reviewed_by      String?   @db.Char(36)
+  reviewed_at      DateTime?
+  created_at       DateTime  @default(now())
+
+  tenant   Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  member   TenantMember @relation(fields: [member_id], references: [id], onDelete: Cascade)
+  reviewer User?        @relation(fields: [reviewed_by], references: [id])
+
+  @@unique([tenant_id, nin_hash])
+  @@index([tenant_id, member_id, created_at])
+  @@map("kyc_submissions")
+}
+
+// ============ WALLET & GIFTING ============
+model Wallet {
+  id           String   @id @default(uuid()) @db.Char(36)
+  tenant_id    String   @db.Char(36)
+  member_id    String   @db.Char(36)
+  balance_kobo BigInt   @default(0)
+  currency     String?  @default("NGN") @db.Char(3)
+  updated_at   DateTime @default(now()) @updatedAt
+
+  tenant       Tenant              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  member       TenantMember        @relation(fields: [member_id], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@unique([tenant_id, member_id])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id            String   @id @default(uuid()) @db.Char(36)
+  tenant_id     String   @db.Char(36)
+  wallet_id     String   @db.Char(36)
+  type          String   @db.VarChar(30)
+  amount_kobo   BigInt
+  balance_after BigInt
+  reference     String   @unique @db.VarChar(100)
+  source        String?  @db.VarChar(40)
+  source_id     String?  @db.Char(36)
+  narration     String?  @db.Text
+  created_at    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [wallet_id], references: [id])
+
+  @@index([wallet_id, created_at])
+  @@map("wallet_transactions")
+}
+
+model GiftBatch {
+  id                String    @id @default(uuid()) @db.Char(36)
+  tenant_id         String    @db.Char(36)
+  created_by        String    @db.Char(36)
+  type              String    @db.VarChar(20)
+  total_amount_kobo BigInt
+  recipient_count   Int
+  filter_json       Json?
+  status            String    @default("draft") @db.VarChar(30)
+  approved_by       String?   @db.Char(36)
+  approved_at       DateTime?
+  created_at        DateTime  @default(now())
+
+  tenant   Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  creator  User   @relation("BatchCreator", fields: [created_by], references: [id])
+  approver User?  @relation("BatchApprover", fields: [approved_by], references: [id])
+  gifts    Gift[]
+
+  @@index([tenant_id, status])
+  @@map("gift_batches")
+}
+
+model Gift {
+  id                  String   @id @default(uuid()) @db.Char(36)
+  tenant_id           String   @db.Char(36)
+  batch_id            String?  @db.Char(36)
+  recipient_member_id String   @db.Char(36)
+  type                String   @db.VarChar(20)
+  amount_kobo         BigInt?
+  status              String   @default("pending") @db.VarChar(30)
+  created_at          DateTime @default(now())
+
+  tenant    Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  batch     GiftBatch?   @relation(fields: [batch_id], references: [id])
+  recipient TenantMember @relation(fields: [recipient_member_id], references: [id])
+
+  @@index([tenant_id, recipient_member_id, created_at])
+  @@index([batch_id])
+  @@map("gifts")
+}
+
+// ============ INCIDENTS ============
+// The PostGIS GEOGRAPHY column becomes plain lat/lng columns.
+model Incident {
+  id                 String   @id @default(uuid()) @db.Char(36)
+  tenant_id          String   @db.Char(36)
+  reporter_member_id String   @db.Char(36)
+  type               String   @db.VarChar(40)
+  severity           String   @default("medium") @db.VarChar(20)
+  title              String?  @db.VarChar(200)
+  description        String?  @db.Text
+  media_urls         Json?
+  lat                Float?
+  lng                Float?
+  lga_id             Int?
+  ward_id            Int?
+  polling_unit_id    Int?
+  status             String   @default("open") @db.VarChar(20)
+  created_at         DateTime @default(now())
+
+  tenant   Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  reporter TenantMember @relation(fields: [reporter_member_id], references: [id])
+
+  @@index([tenant_id, created_at])
+  @@map("incidents")
+}
+
+// ============ AUDIT ============
+model AuditLog {
+  id            BigInt   @id @default(autoincrement())
+  tenant_id     String?  @db.Char(36)
+  actor_user_id String?  @db.Char(36)
+  action        String   @db.VarChar(80)
+  entity_type   String?  @db.VarChar(60)
+  entity_id     String?  @db.Char(36)
+  after_data    Json?
+  created_at    DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenant_id], references: [id])
+  actor  User?   @relation(fields: [actor_user_id], references: [id])
+
+  @@map("audit_logs")
+}
