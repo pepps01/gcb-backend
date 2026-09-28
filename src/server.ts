@@ -1,11 +1,15 @@
+import http from 'http';
 import { createApp } from './app';
+import { attachRealtime } from './realtime/io';
 import { env } from './config/env';
 import { prisma } from './config/db';
 import { logger } from './config/logger';
 
 const app = createApp();
+const server = http.createServer(app);
+attachRealtime(server);
 
-app.listen(env.PORT, () => {
+server.listen(env.PORT, () => {
     logger.info({ port: env.PORT }, 'GCB API listening');
 });
 

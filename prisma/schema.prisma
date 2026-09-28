@@ -36,6 +36,17 @@ model Tenant {
   incidents    Incident[]
   audit_logs   AuditLog[]
 
+  conversations        Conversation[]
+  conversation_members ConversationMember[]
+  messages             Message[]
+  message_reports      MessageReport[]
+
+  lgas          Lga[]
+  wards         Ward[]
+  polling_units PollingUnit[]
+  uploads       Upload[]
+  bank_accounts BankAccount[]
+
   @@map("tenants")
 }
 
@@ -122,6 +133,12 @@ model TenantMember {
   gifts     Gift[]
   incidents Incident[]
 
+  conversations   ConversationMember[]
+  messages        Message[]
+  message_reports MessageReport[]
+  uploads         Upload[]
+  bank_account    BankAccount?
+
   @@unique([tenant_id, user_id])
   @@index([tenant_id, status])
   @@map("tenant_members")
@@ -155,6 +172,9 @@ model KycSubmission {
   vin_hash         String?   @db.Char(64)
   nin_slip_url     String?   @db.Text
   pvc_url          String?   @db.Text
+  // Private uploads (uploads.id); the *_url columns are legacy
+  nin_slip_upload_id String? @db.Char(36)
+  pvc_upload_id      String? @db.Char(36)
   lga_id           Int?
   ward_id          Int?
   polling_unit_id  Int?
@@ -171,6 +191,88 @@ model KycSubmission {
   @@unique([tenant_id, nin_hash])
   @@index([tenant_id, member_id, created_at])
   @@map("kyc_submissions")
+}
+
+// ============ LOCATIONS ============
+// Each campaign loads its own constituency (INEC LGAs, wards, polling units), e.g. by CSV import.
+// tenant_members / kyc_submissions / incidents refer to these ids without foreign keys.
+model Lga {
+  id         Int      @id @default(autoincrement())
+  tenant_id  String   @db.Char(36)
+  name       String   @db.VarChar(100)
+  code       String?  @db.VarChar(20)
+  created_at DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  wards  Ward[]
+
+  @@unique([tenant_id, name])
+  @@map("lgas")
+}
+
+model Ward {
+  id        Int     @id @default(autoincrement())
+  tenant_id String  @db.Char(36)
+  lga_id    Int
+  name      String  @db.VarChar(100)
+  code      String? @db.VarChar(20)
+
+  tenant        Tenant        @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lga           Lga           @relation(fields: [lga_id], references: [id], onDelete: Cascade)
+  polling_units PollingUnit[]
+
+  @@unique([lga_id, name])
+  @@index([tenant_id])
+  @@map("wards")
+}
+
+model PollingUnit {
+  id        Int     @id @default(autoincrement())
+  tenant_id String  @db.Char(36)
+  ward_id   Int
+  name      String  @db.VarChar(200)
+  code      String? @db.VarChar(30)
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  ward   Ward   @relation(fields: [ward_id], references: [id], onDelete: Cascade)
+
+  @@unique([ward_id, name])
+  @@index([tenant_id])
+  @@map("polling_units")
+}
+
+// ============ UPLOADS ============
+// Private files (KYC documents). Bytes live in storage (local disk in dev) under storage_key.
+model Upload {
+  id          String   @id @default(uuid()) @db.Char(36)
+  tenant_id   String   @db.Char(36)
+  member_id   String   @db.Char(36)
+  kind        String   @db.VarChar(30)
+  mime        String   @db.VarChar(60)
+  size_bytes  Int
+  storage_key String   @db.VarChar(255)
+  created_at  DateTime @default(now())
+
+  tenant Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  member TenantMember @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, member_id])
+  @@map("uploads")
+}
+
+model BankAccount {
+  member_id      String   @id @db.Char(36)
+  tenant_id      String   @db.Char(36)
+  bank_name      String   @db.VarChar(100)
+  account_number String   @db.Char(10)
+  account_name   String   @db.VarChar(200)
+  updated_at     DateTime @default(now()) @updatedAt
+
+  tenant Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  member TenantMember @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@map("member_bank_accounts")
 }
 
 // ============ WALLET & GIFTING ============
@@ -275,6 +377,99 @@ model Incident {
 
   @@index([tenant_id, created_at])
   @@map("incidents")
+}
+
+// ============ CHAT ============
+// type: direct | group | broadcast. Scoped conversations (scope_type all | lga | ward) get their
+// verified members added automatically; auto_key marks the one auto-created group per ward/LGA.
+model Conversation {
+  id              String    @id @default(uuid()) @db.Char(36)
+  tenant_id       String    @db.Char(36)
+  type            String    @db.VarChar(20)
+  name            String?   @db.VarChar(120)
+  description     String?   @db.VarChar(255)
+  scope_type      String?   @db.VarChar(10)
+  scope_id        Int?
+  auto_key        String?   @db.VarChar(40)
+  direct_key      String?   @db.VarChar(80)
+  created_by      String?   @db.Char(36)
+  last_message_id BigInt?
+  last_message_at DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+
+  tenant   Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  members  ConversationMember[]
+  messages Message[]
+
+  @@unique([tenant_id, auto_key])
+  @@unique([tenant_id, direct_key])
+  @@index([tenant_id, scope_type, scope_id])
+  @@map("conversations")
+}
+
+model ConversationMember {
+  conversation_id      String    @db.Char(36)
+  member_id            String    @db.Char(36)
+  tenant_id            String    @db.Char(36)
+  role                 String    @default("member") @db.VarChar(20)
+  // Moderation: cannot post until this time
+  muted_until          DateTime?
+  last_read_message_id BigInt?
+  joined_at            DateTime  @default(now())
+
+  tenant       Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  member       TenantMember @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  @@id([conversation_id, member_id])
+  @@index([tenant_id, member_id])
+  @@map("conversation_members")
+}
+
+model Message {
+  id               BigInt    @id @default(autoincrement())
+  tenant_id        String    @db.Char(36)
+  conversation_id  String    @db.Char(36)
+  sender_member_id String    @db.Char(36)
+  // Client-generated id so a retried send isn't stored twice
+  client_id        String?   @db.VarChar(64)
+  body             String    @db.Text
+  reply_to_id      BigInt?
+  deleted_at       DateTime?
+  deleted_by       String?   @db.Char(36)
+  created_at       DateTime  @default(now())
+
+  tenant       Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  conversation Conversation    @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender       TenantMember    @relation(fields: [sender_member_id], references: [id], onDelete: Cascade)
+  reply_to     Message?        @relation("Replies", fields: [reply_to_id], references: [id], onDelete: SetNull)
+  replies      Message[]       @relation("Replies")
+  reports      MessageReport[]
+
+  @@unique([sender_member_id, client_id])
+  @@index([conversation_id, id])
+  @@map("messages")
+}
+
+model MessageReport {
+  id                 String    @id @default(uuid()) @db.Char(36)
+  tenant_id          String    @db.Char(36)
+  message_id         BigInt
+  reporter_member_id String    @db.Char(36)
+  reason             String    @db.VarChar(500)
+  status             String    @default("open") @db.VarChar(20)
+  resolved_by        String?   @db.Char(36)
+  resolved_at        DateTime?
+  created_at         DateTime  @default(now())
+
+  tenant   Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  message  Message      @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  reporter TenantMember @relation(fields: [reporter_member_id], references: [id], onDelete: Cascade)
+
+  @@unique([message_id, reporter_member_id])
+  @@index([tenant_id, status])
+  @@map("message_reports")
 }
 
 // ============ AUDIT ============

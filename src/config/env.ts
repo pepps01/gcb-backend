@@ -13,7 +13,15 @@ export const env = {
     LOG_LEVEL: process.env.LOG_LEVEL || 'info',
     // Number of proxy hops to trust for req.ip (1 behind an AWS load balancer); unset = trust none
     TRUST_PROXY: parseInt(process.env.TRUST_PROXY || '0', 10),
+    // Login/register attempts per IP per 15 minutes
+    AUTH_RATE_LIMIT: parseInt(process.env.AUTH_RATE_LIMIT || '20', 10),
+    // Chat messages per member per minute
+    MESSAGE_RATE_LIMIT: parseInt(process.env.MESSAGE_RATE_LIMIT || '30', 10),
+    // Private uploads (KYC documents) on local disk until S3 is set up
+    UPLOAD_DIR: process.env.UPLOAD_DIR || 'uploads',
     CORS_ORIGINS: (process.env.CORS_ORIGINS || 'http://localhost:3000').split(','),
+    // PEM CA certificate for a managed MySQL that requires TLS (e.g. Aiven); unset = plain connection
+    DATABASE_CA: process.env.DATABASE_CA?.replace(/\\n/g, '\n') || undefined,
 };
 
 if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');

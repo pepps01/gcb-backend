@@ -11,6 +11,11 @@ import authRoutes from './modules/auth/route';
 import kycRoutes from './modules/kyc/route';
 import giftRoutes from './modules/gifting/route';
 import incidentRoutes from './modules/incidents/route';
+import memberRoutes from './modules/members/route';
+import levelRoutes from './modules/levels/route';
+import chatRoutes from './modules/chat/route';
+import locationRoutes from './modules/locations/route';
+import uploadRoutes from './modules/uploads/route';
 
 export function createApp() {
     const app = express();
@@ -41,6 +46,11 @@ export function createApp() {
     app.use('/api/kyc', kycRoutes);
     app.use('/api/gifting', giftRoutes);
     app.use('/api/incidents', incidentRoutes);
+    app.use('/api/members', memberRoutes);
+    app.use('/api/levels', levelRoutes);
+    app.use('/api/chat', chatRoutes);
+    app.use('/api/locations', locationRoutes);
+    app.use('/api/uploads', uploadRoutes);
 
     app.use(notFound);
     app.use(errorHandler);

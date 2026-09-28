@@ -3,13 +3,15 @@ import { z } from 'zod';
 import { prisma } from '../../config/db';
 import { asyncHandler } from '../../utils/async';
 import { requireAuth, requireRole } from '../../middleware/auth';
+import { requireFeature } from '../../middleware/tenants';
 
 const router = Router();
+router.use(requireFeature('gifting'));
 
 const filterSchema = z.object({
     lga_id: z.number().int().optional(),
     ward_id: z.number().int().optional(),
-    level: z.string().optional(),
+    level_id: z.string().uuid().optional(),
 });
 type GiftFilter = z.infer<typeof filterSchema>;
 
@@ -24,7 +26,7 @@ const recipientWhere = (tenant_id: string, f: GiftFilter) => ({
     status: 'verified',
     ...(f.lga_id ? { lga_id: f.lga_id } : {}),
     ...(f.ward_id ? { ward_id: f.ward_id } : {}),
-    ...(f.level ? { level: f.level } : {}),
+    ...(f.level_id ? { level_id: f.level_id } : {}),
 });
 
 router.post(
@@ -150,6 +152,65 @@ router.post(
         );
 
         res.json({ ok: true });
+    })
+);
+
+router.get(
+    '/batches',
+    requireAuth,
+    requireRole('tenant_admin', 'treasurer'),
+    asyncHandler(async (req, res) => {
+        const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+        const batches = await prisma.giftBatch.findMany({
+            where: { tenant_id: req.tenant!.id, ...(status ? { status } : {}) },
+            orderBy: { created_at: 'desc' },
+            take: 100,
+            select: {
+                id: true, type: true, status: true, total_amount_kobo: true, recipient_count: true,
+                filter_json: true, created_at: true, approved_at: true,
+                creator: { select: { id: true, full_name: true } },
+                approver: { select: { id: true, full_name: true } },
+            },
+        });
+        res.json({ batches });
+    })
+);
+
+router.post(
+    '/batches/:id/reject',
+    requireAuth,
+    requireRole('tenant_admin', 'treasurer'),
+    asyncHandler(async (req, res) => {
+        const batchId = String(req.params.id);
+        const tenant_id = req.tenant!.id;
+        const { count } = await prisma.giftBatch.updateMany({
+            where: { id: batchId, tenant_id, status: 'pending_approval' },
+            data: { status: 'rejected', approved_by: req.user!.id, approved_at: new Date() },
+        });
+        if (!count) throw { status: 404, message: 'Pending batch not found' };
+        await prisma.auditLog.create({
+            data: { tenant_id, actor_user_id: req.user!.id, action: 'gift.reject', entity_type: 'gift_batch', entity_id: batchId },
+        });
+        res.json({ ok: true });
+    })
+);
+
+router.get(
+    '/wallet',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+        const wallet = await prisma.wallet.findUnique({
+            where: { tenant_id_member_id: { tenant_id: req.tenant!.id, member_id: req.membership!.id } },
+            select: {
+                balance_kobo: true, currency: true,
+                transactions: {
+                    orderBy: { created_at: 'desc' },
+                    take: 50,
+                    select: { id: true, type: true, amount_kobo: true, balance_after: true, narration: true, created_at: true },
+                },
+            },
+        });
+        res.json({ wallet: wallet ?? { balance_kobo: 0, currency: 'NGN', transactions: [] } });
     })
 );
 
