@@ -18,6 +18,7 @@ export const prisma = new PrismaClient({
         password: decodeURIComponent(u.password),
         database: u.pathname.slice(1),
         connectionLimit: 10,
+        ssl: env.DATABASE_CA ? { ca: env.DATABASE_CA } : undefined,
     }),
 });
 

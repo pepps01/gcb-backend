@@ -5,18 +5,29 @@ import { prisma } from '../../config/db';
 import { asyncHandler } from '../../utils/async';
 import { requireAuth, requireRole } from '../../middleware/auth';
 import { env } from '../../config/env';
+import { syncScopedConversations } from '../chat/membership';
+import { assertValidLocation, withLocationNames } from '../locations/resolve';
 
 const router = Router();
 
+// Location defaults to what the member saved in step 1 (PATCH /api/members/me)
 const submitSchema = z.object({
-    nin: z.string().length(11),
-    vin: z.string().min(10),
-    lga_id: z.number().int(),
-    ward_id: z.number().int(),
-    polling_unit_id: z.number().int(),
-    nin_slip_url: z.string().url().optional(),
-    pvc_url: z.string().url().optional(),
+    nin: z.string().regex(/^\d{11}$/, 'NIN must be 11 digits'),
+    vin: z.string().trim().min(10).max(30),
+    lga_id: z.number().int().optional(),
+    ward_id: z.number().int().optional(),
+    polling_unit_id: z.number().int().optional(),
+    nin_slip_upload_id: z.string().uuid().optional(),
+    pvc_upload_id: z.string().uuid().optional(),
 });
+
+/** The upload must be the caller's own and of the expected kind. */
+async function ownUpload(tenant_id: string, member_id: string, id: string | undefined, kind: string) {
+    if (!id) return null;
+    const u = await prisma.upload.findFirst({ where: { id, tenant_id, member_id, kind }, select: { id: true } });
+    if (!u) throw { status: 400, message: `Unknown ${kind === 'kyc_pvc' ? 'voter card' : 'NIN slip'} upload` };
+    return u.id;
+}
 
 // Keyed hash: NIN/VIN have tiny search spaces, so an unkeyed hash could be brute-forced offline.
 const hmac = (s: string) => crypto.createHmac('sha256', env.KYC_PEPPER).update(s).digest('hex');
@@ -29,14 +40,24 @@ router.post(
         const tenant_id = req.tenant!.id;
         const member_id = req.membership!.id;
 
+        const saved = await prisma.tenantMember.findUniqueOrThrow({
+            where: { id: member_id },
+            select: { lga_id: true, ward_id: true, polling_unit_id: true },
+        });
+        const lga_id = body.lga_id ?? saved.lga_id;
+        const ward_id = body.ward_id ?? saved.ward_id;
+        const polling_unit_id = body.polling_unit_id ?? saved.polling_unit_id;
+        if (!lga_id || !ward_id || !polling_unit_id) throw { status: 400, message: 'Choose your LGA, ward and polling unit first' };
+        await assertValidLocation(tenant_id, lga_id, ward_id, polling_unit_id);
+
         const nin_hash = hmac(body.nin);
         const fields = {
             vin_hash: hmac(body.vin),
-            nin_slip_url: body.nin_slip_url || null,
-            pvc_url: body.pvc_url || null,
-            lga_id: body.lga_id,
-            ward_id: body.ward_id,
-            polling_unit_id: body.polling_unit_id,
+            nin_slip_upload_id: await ownUpload(tenant_id, member_id, body.nin_slip_upload_id, 'kyc_nin_slip'),
+            pvc_upload_id: await ownUpload(tenant_id, member_id, body.pvc_upload_id, 'kyc_pvc'),
+            lga_id,
+            ward_id,
+            polling_unit_id,
         };
 
         await prisma.$transaction(async (tx) => {
@@ -64,7 +85,7 @@ router.post(
 
             await tx.tenantMember.update({
                 where: { id: member_id },
-                data: { lga_id: body.lga_id, ward_id: body.ward_id, polling_unit_id: body.polling_unit_id },
+                data: { lga_id, ward_id, polling_unit_id },
             });
         });
 
@@ -85,7 +106,27 @@ router.get(
     })
 );
 
-// Admin verification
+// Admin verification queue. NIN/VIN are never returned: only their hashes are stored.
+router.get(
+    '/submissions',
+    requireAuth,
+    requireRole('tenant_admin', 'lga_coordinator'),
+    asyncHandler(async (req, res) => {
+        const status = typeof req.query.status === 'string' ? req.query.status : 'pending';
+        const submissions = await prisma.kycSubmission.findMany({
+            where: { tenant_id: req.tenant!.id, status },
+            orderBy: { created_at: 'asc' },
+            take: 200,
+            select: {
+                id: true, status: true, lga_id: true, ward_id: true, polling_unit_id: true,
+                nin_slip_upload_id: true, pvc_upload_id: true, rejection_reason: true, created_at: true, reviewed_at: true,
+                member: { select: { id: true, user: { select: { full_name: true, phone: true } } } },
+            },
+        });
+        res.json({ submissions: await withLocationNames(req.tenant!.id, submissions) });
+    })
+);
+
 const reviewSchema = z.object({
     submission_id: z.string().uuid(),
     decision: z.enum(['verified', 'rejected']),
@@ -100,7 +141,7 @@ router.post(
         const body = reviewSchema.parse(req.body);
         const tenant_id = req.tenant!.id;
 
-        await prisma.$transaction(async (tx) => {
+        const sub = await prisma.$transaction(async (tx) => {
             const sub = await tx.kycSubmission.findFirst({
                 where: { id: body.submission_id, tenant_id, status: 'pending' },
                 select: { id: true, member_id: true },
@@ -122,7 +163,10 @@ router.post(
                 where: { id: sub.member_id, tenant_id, status: { not: 'banned' } },
                 data: { status: body.decision, verified_at: body.decision === 'verified' ? new Date() : null },
             });
+            return sub;
         });
+        // Verified members join their ward/LGA chats; rejected ones leave them
+        await syncScopedConversations(tenant_id, req.tenant!.features, sub.member_id);
 
         res.json({ ok: true });
     })

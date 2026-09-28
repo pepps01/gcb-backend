@@ -3,10 +3,12 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { prisma } from '../../config/db';
+import { Prisma } from '../../generated/prisma/client';
 import { asyncHandler } from '../../utils/async';
 import { signToken, requireAuth } from '../../middleware/auth';
 import { authLimiter } from '../../middleware/rateLimit';
 import { normalizePhone } from '../../utils/phone';
+import { withLocationNames } from '../locations/resolve';
 
 const router = Router();
 
@@ -23,7 +25,8 @@ const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 const newReferralCode = () => `GCB${crypto.randomBytes(5).toString('hex').slice(0, 7).toUpperCase()}`;
 
-const memberSelect = { id: true, role: true, level: true, status: true } as const;
+const levelSelect = { select: { id: true, name: true, rank: true } } as const;
+const memberSelect = { id: true, role: true, level: levelSelect, status: true } as const;
 
 /**
  * POST /api/auth/register
@@ -71,7 +74,12 @@ router.post(
             referrerMemberId = r?.id ?? null;
         }
 
-        let member: { id: string; role: string; level: string | null; status: string } | undefined;
+        const defaultLevel = await prisma.level.findFirst({
+            where: { tenant_id: tenant.id, is_default: true },
+            select: { id: true },
+        });
+
+        let member: Prisma.TenantMemberGetPayload<{ select: typeof memberSelect }> | undefined;
         for (let attempt = 0; attempt < 5 && !member; attempt++) {
             try {
                 member = await prisma.tenantMember.create({
@@ -79,7 +87,7 @@ router.post(
                         tenant_id: tenant.id,
                         user_id: userId,
                         role: 'supporter',
-                        level: 'Supporter',
+                        level_id: defaultLevel?.id ?? null,
                         referral_code: newReferralCode(),
                         referred_by: referrerMemberId,
                         status: 'pending',
@@ -154,9 +162,11 @@ router.get(
         });
         const membership = await prisma.tenantMember.findUnique({
             where: { id: req.membership!.id },
-            select: { id: true, role: true, level: true, status: true, referral_code: true, lga_id: true, ward_id: true, polling_unit_id: true },
+            select: { ...memberSelect, referral_code: true, referred_by: true, lga_id: true, ward_id: true, polling_unit_id: true },
         });
-        res.json({ user, membership, tenant: { id: req.tenant!.id, slug: req.tenant!.slug } });
+        const [located] = await withLocationNames(req.tenant!.id, [membership!]);
+        const has_bank = !!(await prisma.bankAccount.findUnique({ where: { member_id: req.membership!.id }, select: { member_id: true } }));
+        res.json({ user, membership: { ...located, has_bank, referred: !!located.referred_by }, tenant: { id: req.tenant!.id, slug: req.tenant!.slug } });
     })
 );
 

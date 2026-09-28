@@ -1,0 +1,30 @@
+# Render Blueprint (free plan, for now). The free plan sleeps after 15 idle minutes and its disk is
+# wiped on every restart, so uploads (UPLOAD_DIR) do not survive until storage moves to S3.
+services:
+  - type: web
+    name: gcb-backend
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    healthCheckPath: /health
+    # Free plan has no pre-deploy step, so migrations run on every start
+    dockerCommand: sh -c "npx prisma migrate deploy && node dist/src/server.js"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_CA
+        sync: false
+      # Generated once by Render and then kept; never rotate KYC_PEPPER once data exists
+      - key: JWT_SECRET
+        generateValue: true
+      - key: KYC_PEPPER
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: https://gcb-frontend-nine.vercel.app
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DEFAULT_TENANT_SLUG
+        value: gyb

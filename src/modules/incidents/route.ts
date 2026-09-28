@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../../config/db';
 import { asyncHandler } from '../../utils/async';
 import { requireAuth, requireRole } from '../../middleware/auth';
+import { requireFeature } from '../../middleware/tenants';
 
 const router = Router();
+router.use(requireFeature('situation_room'));
 
 const createSchema = z.object({
     type: z.enum(['security_threat', 'vote_buying', 'violence', 'bvas_issue', 'logistics', 'other']),
@@ -65,6 +67,39 @@ router.get(
             },
         });
         res.json({ incidents });
+    })
+);
+
+router.get(
+    '/mine',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+        const incidents = await prisma.incident.findMany({
+            where: { tenant_id: req.tenant!.id, reporter_member_id: req.membership!.id },
+            orderBy: { created_at: 'desc' },
+            take: 50,
+            select: { id: true, type: true, severity: true, title: true, status: true, created_at: true },
+        });
+        res.json({ incidents });
+    })
+);
+
+const statusSchema = z.object({ status: z.enum(['open', 'investigating', 'resolved', 'dismissed']) });
+
+router.patch(
+    '/:id',
+    requireAuth,
+    requireRole('tenant_admin', 'lga_coordinator', 'situation_agent'),
+    asyncHandler(async (req, res) => {
+        const { status } = statusSchema.parse(req.body);
+        const tenant_id = req.tenant!.id;
+        const id = String(req.params.id);
+        const { count } = await prisma.incident.updateMany({ where: { id, tenant_id }, data: { status } });
+        if (!count) throw { status: 404, message: 'Incident not found' };
+        await prisma.auditLog.create({
+            data: { tenant_id, actor_user_id: req.user!.id, action: 'incident.status', entity_type: 'incident', entity_id: id, after_data: { status } },
+        });
+        res.json({ ok: true });
     })
 );
 

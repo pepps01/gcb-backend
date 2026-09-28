@@ -19,7 +19,7 @@ declare global {
         interface Request {
             tenant?: TenantRow;
             user?: { id: string; phone: string };
-            membership?: { id: string; role: string; level: string | null; tenant_id: string };
+            membership?: { id: string; role: string; level_id: string | null; tenant_id: string };
         }
     }
 }

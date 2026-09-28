@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { prisma } from '../config/db';
 
-interface JwtPayload {
+export interface JwtPayload {
     sub: string;       // user id
     phone: string;
     tenant_id: string;
@@ -14,17 +14,22 @@ export function signToken(payload: JwtPayload) {
     return jwt.sign(payload, env.JWT_SECRET, { algorithm: 'HS256', expiresIn: env.JWT_EXPIRES_IN as any });
 }
 
+/** The token's claims, or null if it is forged or expired. */
+export function verifyToken(token: string): JwtPayload | null {
+    try {
+        return jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
+    } catch {
+        return null;
+    }
+}
+
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) return next({ status: 401, message: 'Missing token' });
 
-    let decoded: JwtPayload;
-    try {
-        decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
-    } catch {
-        return next({ status: 401, message: 'Invalid or expired token' });
-    }
+    const decoded = verifyToken(token);
+    if (!decoded) return next({ status: 401, message: 'Invalid or expired token' });
 
     // Anything below that throws (e.g. DB down) is a server error, not a bad token.
     try {
@@ -37,7 +42,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
 
         const member = await prisma.tenantMember.findUnique({
             where: { tenant_id_user_id: { tenant_id: req.tenant.id, user_id: decoded.sub } },
-            select: { id: true, role: true, level: true, tenant_id: true, status: true },
+            select: { id: true, role: true, level_id: true, tenant_id: true, status: true },
         });
         if (!member) return next({ status: 403, message: 'Not a member of this tenant' });
         if (member.status === 'banned') return next({ status: 403, message: 'Account banned' });
