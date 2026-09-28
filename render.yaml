@@ -9,7 +9,7 @@ services:
     branch: main
     healthCheckPath: /health
     # Free plan has no pre-deploy step, so migrations run on every start
-    dockerCommand: sh -c "npx prisma migrate deploy && node dist/src/server.js"
+    dockerCommand: npm run start:migrate
     envVars:
       - key: NODE_ENV
         value: production
