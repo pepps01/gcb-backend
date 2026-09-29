@@ -27,4 +27,4 @@ services:
       - key: TRUST_PROXY
         value: "1"
       - key: DEFAULT_TENANT_SLUG
-        value: gyb
+        value: syb

@@ -29,7 +29,7 @@ function extractSlug(req: Request): string | null {
     if (typeof headerSlug === 'string' && headerSlug) return headerSlug;
 
     const host = (req.headers.host || '').split(':')[0];
-    // e.g. gyb.gcb.app -> gyb ; gyb.localhost -> gyb ; campaign.ng -> custom domain lookup
+    // e.g. syb.gcb.app -> syb ; syb.localhost -> syb ; campaign.ng -> custom domain lookup
     const parts = host.split('.');
     if (parts.length >= 3 && host.endsWith(`.${env.ROOT_DOMAIN}`)) {
         return parts[0];
