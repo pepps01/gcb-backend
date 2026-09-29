@@ -17,9 +17,9 @@ const LEVELS = [
 
 async function main() {
     const tenant = await prisma.tenant.upsert({
-        where: { slug: 'gyb' },
+        where: { slug: 'syb' },
         update: {},
-        create: { slug: 'gyb', name: 'GYB Campaign Hub', subdomain: 'gyb', tenant_type: 'campaign', default_language: 'en' },
+        create: { slug: 'syb', name: 'SYB Hub', subdomain: 'syb', tenant_type: 'campaign', default_language: 'en' },
     });
 
     await prisma.tenantBranding.upsert({
@@ -27,11 +27,13 @@ async function main() {
         update: {},
         create: {
             tenant_id: tenant.id,
-            app_name: 'GYB Campaign Hub',
+            app_name: 'SYB Hub',
             tagline: 'Kogi Central 2027',
-            primary_color: '#0B6E4F',
+            // Served by gcb-frontend (public/brand/)
+            logo_url: '/brand/syb-logo.png',
+            primary_color: '#C8102E',
             secondary_color: '#F2A900',
-            sms_sender_id: 'GYB2027',
+            sms_sender_id: 'SYB2027',
         },
     });
 
@@ -73,7 +75,7 @@ async function main() {
                 level_id: level?.id, referral_code: `GCB${crypto.randomBytes(4).toString('hex').slice(0, 7).toUpperCase()}`,
             },
         });
-        console.log(`✅ Admin ${phone} is tenant_admin of "gyb"`);
+        console.log(`✅ Admin ${phone} is tenant_admin of "syb"`);
     }
     // Backfill: put verified members into their ward/LGA chats (safe to re-run)
     const features = Object.fromEntries(
@@ -82,7 +84,7 @@ async function main() {
     const verified = await prisma.tenantMember.findMany({ where: { tenant_id: tenant.id, status: 'verified' }, select: { id: true } });
     for (const m of verified) await syncScopedConversations(tenant.id, features, m.id);
 
-    console.log('✅ Seeded tenant "gyb"');
+    console.log('✅ Seeded tenant "syb"');
 }
 
 main()

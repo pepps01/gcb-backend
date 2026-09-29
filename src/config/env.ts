@@ -8,7 +8,7 @@ export const env = {
     JWT_SECRET: process.env.JWT_SECRET!,
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
     KYC_PEPPER: process.env.KYC_PEPPER!,
-    DEFAULT_TENANT_SLUG: process.env.DEFAULT_TENANT_SLUG || 'gyb',
+    DEFAULT_TENANT_SLUG: process.env.DEFAULT_TENANT_SLUG || 'syb',
     ROOT_DOMAIN: process.env.ROOT_DOMAIN || 'gcb.app',
     LOG_LEVEL: process.env.LOG_LEVEL || 'info',
     // Number of proxy hops to trust for req.ip (1 behind an AWS load balancer); unset = trust none
